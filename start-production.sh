@@ -100,22 +100,15 @@ check_service "Gateway Orchestrator" "3001"
 # Check Consumer API
 check_service "Consumer API" "3000"
 
-# Check Nginx
-if curl -s -f "http://localhost:80/health" > /dev/null 2>&1; then
-    print_success "Nginx proxy is healthy"
-else
-    print_warning "Nginx proxy might not be ready yet"
-fi
+# Nginx removed - direct access only
 
 print_success "File Watcher Production Environment is running!"
 
 echo ""
 echo "📊 Service URLs:"
-echo "  • API (via Nginx):      http://localhost/api/"
-echo "  • Gateway (via Nginx):  http://localhost/gateway/"
-echo "  • Direct API:           http://localhost:3000/"
-echo "  • Direct Gateway:       http://localhost:3001/"
-echo "  • Kafka UI:             http://localhost:8080/"
+echo "  • Consumer API:          http://localhost:3000/"
+echo "  • Gateway Orchestrator:  http://localhost:3050/"
+echo "  • Kafka UI:              http://localhost:8085/"
 echo ""
 echo "📁 Watched Directories:"
 echo "  • ./watched-files       (mapped to /app/watched-files)"
@@ -128,9 +121,9 @@ echo "  • Stop services:        docker-compose -f docker-compose.prod.yml down
 echo "  • Restart service:      docker-compose -f docker-compose.prod.yml restart <service>"
 echo ""
 echo "📈 Test the system:"
-echo "  • Create a file:        touch watched-files/test.txt"
-echo "  • Check events:         curl http://localhost/api/events"
-echo "  • Check analytics:      curl http://localhost/api/analytics"
+echo "  • Create a file:        touch /tmp/file-watcher-test/test.txt"
+echo "  • Check events:         curl http://localhost:3000/api/events"
+echo "  • Check dashboard:      curl http://localhost:3000/api/dashboard"
 echo ""
 
 # Show container status
