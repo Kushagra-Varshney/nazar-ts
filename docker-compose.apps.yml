@@ -1,0 +1,75 @@
+services:
+  # Gateway Orchestrator
+  gateway:
+    build:
+      context: .
+      dockerfile: Dockerfile.gateway
+    container_name: file-watcher-gateway
+    restart: unless-stopped
+    ports:
+      - "3001:3001"
+    environment:
+      NODE_ENV: production
+      GATEWAY_PORT: 3001
+      KAFKA_BROKERS: localhost:9092  # External Kafka
+      KAFKA_CLIENT_ID: gateway-orchestrator
+    networks:
+      - file-watcher-network
+
+  # Consumer (Analytics API)
+  consumer:
+    build:
+      context: .
+      dockerfile: Dockerfile.consumer
+    container_name: file-watcher-consumer
+    restart: unless-stopped
+    depends_on:
+      - gateway
+    ports:
+      - "3000:3000"
+    environment:
+      NODE_ENV: production
+      APP_MODE: consumer
+      ENABLE_API: "true"
+      PORT: 3000
+      GATEWAY_URL: http://gateway:3001
+      KAFKA_BROKERS: localhost:9092  # External Kafka
+      KAFKA_CLIENT_ID: consumer
+      KAFKA_GROUP_ID: file-events-consumer
+    volumes:
+      - consumer-db:/app/data
+    networks:
+      - file-watcher-network
+
+  # Producer (File Watcher)
+  producer:
+    build:
+      context: .
+      dockerfile: Dockerfile.producer
+    container_name: file-watcher-producer
+    restart: unless-stopped
+    depends_on:
+      - gateway
+    environment:
+      NODE_ENV: production
+      APP_MODE: producer
+      ENABLE_API: "false"
+      GATEWAY_URL: http://gateway:3001
+      KAFKA_BROKERS: localhost:9092  # External Kafka
+      KAFKA_CLIENT_ID: producer
+    volumes:
+      # Mount directories to watch
+      - ./watched-files:/app/watched-files
+      - /tmp/file-watcher-test:/app/test-folder
+      # Add more volumes as needed:
+      # - /path/to/your/directory:/app/watched-directory
+    networks:
+      - file-watcher-network
+
+volumes:
+  consumer-db:
+    driver: local
+
+networks:
+  file-watcher-network:
+    driver: bridge
