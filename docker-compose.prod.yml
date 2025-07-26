@@ -106,7 +106,7 @@ services:
       gateway-orchestrator:
         condition: service_healthy
     ports:
-      - "3000:3000"
+      - "3005:3000"
     environment:
       NODE_ENV: production
       APP_MODE: consumer
