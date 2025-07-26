@@ -1,0 +1,142 @@
+# Kafka Infrastructure Dockerfile
+# Multi-stage build for Kafka with custom configuration
+
+# Zookeeper stage
+FROM confluentinc/cp-zookeeper:7.4.0 AS zookeeper
+
+# Set environment variables
+ENV ZOOKEEPER_CLIENT_PORT=2181
+ENV ZOOKEEPER_TICK_TIME=2000
+ENV ZOOKEEPER_LOG4J_ROOT_LOGLEVEL=WARN
+ENV ZOOKEEPER_TOOLS_LOG4J_LOGLEVEL=ERROR
+
+# Create data directories
+RUN mkdir -p /var/lib/zookeeper/data /var/lib/zookeeper/log && \
+    chown -R appuser:appuser /var/lib/zookeeper
+
+# Expose Zookeeper port
+EXPOSE 2181
+
+# Health check for Zookeeper
+HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 \
+  CMD echo ruok | nc localhost 2181 | grep imok || exit 1
+
+# Kafka stage  
+FROM confluentinc/cp-kafka:7.4.0 AS kafka
+
+# Set environment variables from docker-compose.prod.yml
+ENV KAFKA_BROKER_ID=1
+ENV KAFKA_ZOOKEEPER_CONNECT=zookeeper:2181
+ENV KAFKA_LISTENER_SECURITY_PROTOCOL_MAP=PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+ENV KAFKA_ADVERTISED_LISTENERS=PLAINTEXT://kafka:29092,PLAINTEXT_HOST://localhost:9092
+ENV KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR=1
+ENV KAFKA_TRANSACTION_STATE_LOG_MIN_ISR=1
+ENV KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR=1
+ENV KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS=0
+ENV KAFKA_AUTO_CREATE_TOPICS_ENABLE=true
+ENV KAFKA_DELETE_TOPIC_ENABLE=true
+ENV KAFKA_LOG_RETENTION_HOURS=168
+ENV KAFKA_LOG_SEGMENT_BYTES=1073741824
+ENV KAFKA_LOG_RETENTION_CHECK_INTERVAL_MS=300000
+ENV KAFKA_LOG4J_ROOT_LOGLEVEL=WARN
+ENV KAFKA_TOOLS_LOG4J_LOGLEVEL=ERROR
+
+# Create data directory
+RUN mkdir -p /var/lib/kafka/data && \
+    chown -R appuser:appuser /var/lib/kafka
+
+# Expose Kafka ports
+EXPOSE 9092 9101 29092
+
+# Health check for Kafka
+HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=5 \
+  CMD kafka-topics --bootstrap-server localhost:9092 --list || exit 1
+
+# Kafka UI stage
+FROM provectuslabs/kafka-ui:latest AS kafka-ui
+
+# Set environment variables
+ENV KAFKA_CLUSTERS_0_NAME=local
+ENV KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS=kafka:29092
+ENV KAFKA_CLUSTERS_0_ZOOKEEPER=zookeeper:2181
+ENV LOGGING_LEVEL_ROOT=WARN
+ENV LOGGING_LEVEL_COM_PROVECTUS=INFO
+
+# Expose Kafka UI port
+EXPOSE 8080
+
+# Health check for Kafka UI
+HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 \
+  CMD wget --no-verbose --tries=1 --spider http://localhost:8080 || exit 1
+
+# Production Kafka All-in-One (for single container deployment)
+FROM openjdk:11-jre-slim AS kafka-all-in-one
+
+# Install necessary packages
+RUN apt-get update && apt-get install -y \
+    curl \
+    wget \
+    netcat \
+    && rm -rf /var/lib/apt/lists/*
+
+# Create kafka user
+RUN groupadd -r kafka && useradd -r -g kafka kafka
+
+# Download and install Kafka
+ENV KAFKA_VERSION=2.8.1
+ENV SCALA_VERSION=2.13
+WORKDIR /opt
+
+RUN wget https://archive.apache.org/dist/kafka/${KAFKA_VERSION}/kafka_${SCALA_VERSION}-${KAFKA_VERSION}.tgz && \
+    tar -xzf kafka_${SCALA_VERSION}-${KAFKA_VERSION}.tgz && \
+    mv kafka_${SCALA_VERSION}-${KAFKA_VERSION} kafka && \
+    rm kafka_${SCALA_VERSION}-${KAFKA_VERSION}.tgz
+
+# Create directories
+RUN mkdir -p /var/lib/kafka/data /var/lib/zookeeper/data /var/log/kafka && \
+    chown -R kafka:kafka /opt/kafka /var/lib/kafka /var/lib/zookeeper /var/log/kafka
+
+# Copy configuration files
+COPY --chown=kafka:kafka kafka-config/ /opt/kafka/config/
+
+# Set environment variables
+ENV KAFKA_HOME=/opt/kafka
+ENV PATH=$PATH:$KAFKA_HOME/bin
+
+# Create startup script
+RUN echo '#!/bin/bash\n\
+\n\
+# Start Zookeeper in background\n\
+echo "Starting Zookeeper..."\n\
+$KAFKA_HOME/bin/zookeeper-server-start.sh $KAFKA_HOME/config/zookeeper.properties &\n\
+ZOOKEEPER_PID=$!\n\
+\n\
+# Wait for Zookeeper to start\n\
+sleep 10\n\
+\n\
+# Start Kafka\n\
+echo "Starting Kafka..."\n\
+$KAFKA_HOME/bin/kafka-server-start.sh $KAFKA_HOME/config/server.properties &\n\
+KAFKA_PID=$!\n\
+\n\
+# Create file-events topic if it does not exist\n\
+sleep 15\n\
+$KAFKA_HOME/bin/kafka-topics.sh --create --topic file-events --bootstrap-server localhost:9092 --partitions 3 --replication-factor 1 --if-not-exists\n\
+\n\
+# Wait for both processes\n\
+wait $ZOOKEEPER_PID $KAFKA_PID' > /opt/kafka/start-kafka.sh
+
+RUN chmod +x /opt/kafka/start-kafka.sh && chown kafka:kafka /opt/kafka/start-kafka.sh
+
+# Switch to kafka user
+USER kafka
+
+# Expose ports
+EXPOSE 2181 9092 9101
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=5 \
+  CMD $KAFKA_HOME/bin/kafka-topics.sh --bootstrap-server localhost:9092 --list || exit 1
+
+# Start Kafka and Zookeeper
+CMD ["/opt/kafka/start-kafka.sh"]
