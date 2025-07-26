@@ -61,13 +61,14 @@ ENV KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS=kafka:29092
 ENV KAFKA_CLUSTERS_0_ZOOKEEPER=zookeeper:2181
 ENV LOGGING_LEVEL_ROOT=WARN
 ENV LOGGING_LEVEL_COM_PROVECTUS=INFO
+ENV SERVER_PORT=7001
 
 # Expose Kafka UI port
-EXPOSE 8080
+EXPOSE 7001
 
 # Health check for Kafka UI
 HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 \
-  CMD wget --no-verbose --tries=1 --spider http://localhost:8080 || exit 1
+  CMD wget --no-verbose --tries=1 --spider http://localhost:7001 || exit 1
 
 # Production Kafka All-in-One (for single container deployment)
 FROM openjdk:11-jre-slim AS kafka-all-in-one
